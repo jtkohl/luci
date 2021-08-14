@@ -13,7 +13,7 @@ return baseclass.extend({
 
 		o = s.option(form.DynamicList, 'Hosts', _('Monitor hosts'));
 		o.default = '127.0.0.1';
-		o.datatype = 'ipaddr("nomask")';
+		o.datatype = 'host';
 		o.depends('enable', '1');
 
 		o = s.option(form.ListValue, 'AddressFamily', _('Address family'));
@@ -31,6 +31,10 @@ return baseclass.extend({
 		o = s.option(form.Value, 'Interval', _('Interval for pings'), _('Seconds'));
 		o.default = '30';
 		o.datatype = 'ufloat';
+		o.depends('enable', '1');
+
+		o = s.option(form.Value, 'MaxMissed', _('Maximum Missed count before re-resolving hostname (-1: disabled)'));
+		o.default = '-1';
 		o.depends('enable', '1');
 	},
 
