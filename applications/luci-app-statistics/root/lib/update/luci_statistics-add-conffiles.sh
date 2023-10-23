@@ -11,8 +11,8 @@ add_luci_statistics_conffiles()
 		 -a "$rrd_backups_enabled" = "1" \
 		 -a -n "$rrd_dir" ] && {
 		echo "/etc/luci_statistics/rrdbackup.tgz" >>$filelist
-		### If statistics are running, restart it (trigger a backup now)
-		/etc/init.d/luci_statistics status >/dev/null 2>&1 && /etc/init.d/luci_statistics restart
+		### If statistics are running, trigger a backup now
+		/etc/init.d/luci_statistics status >/dev/null 2>&1 && /etc/init.d/luci_statistics backup
 	}
 }
 

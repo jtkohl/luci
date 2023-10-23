@@ -6,6 +6,8 @@ STOP=11
 USE_PROCD=1
 BACKUP_DIR="/etc/luci_statistics"
 BACKUP_FILE="${BACKUP_DIR}/rrdbackup.tgz"
+EXTRA_COMMANDS="backup"
+EXTRA_HELP="        backup          Backup current rrd database if configured to do so"
 
 ### Determine if we should do backups/restores
 rrd_enabled=$(uci -q get luci_statistics.collectd_rrdtool.enable)
@@ -16,7 +18,7 @@ rrd_dir=$(uci -q get luci_statistics.collectd_rrdtool.DataDir)
 [ "$rrd_enabled" = "1" \
 		 -a "$rrd_backups_enabled" = "1" \
 		 -a -n "$rrd_dir" ] && {
-	do_backups=yes
+    do_backups=yes
 }
 
 service_triggers()
@@ -67,9 +69,18 @@ rrd_backup() {
 	}
 }
 
+backup() {
+	/etc/init.d/collectd status >/dev/null 2>&1 && {
+		collectd_restart=yes
+		/etc/init.d/collectd stop >/dev/null 2>&1
+	}
+	rrd_backup
+	[ "$collectd_restart" = "yes" ] && /etc/init.d/collectd start >/dev/null 2>&1
+}
+
 stop_service() {
 	/etc/init.d/collectd stop
-	rrd_backup
+	backup
 }
 
 reload_service() {
