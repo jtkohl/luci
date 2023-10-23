@@ -6,8 +6,9 @@ STOP=11
 USE_PROCD=1
 BACKUP_DIR="/etc/luci_statistics"
 BACKUP_FILE="${BACKUP_DIR}/rrdbackup.tgz"
-EXTRA_COMMANDS="backup"
-EXTRA_HELP="        backup          Backup current rrd database if configured to do so"
+EXTRA_COMMANDS="backup backups_enabled"
+EXTRA_HELP="        backup          Backup current rrd database if configured to do so\n\
+        backups_enabled Indicate backup via exit status (0 for enabled, non-0 if disabled)"
 
 ### Determine if we should do backups/restores
 rrd_enabled=$(uci -q get luci_statistics.collectd_rrdtool.enable)
@@ -23,10 +24,12 @@ rrd_dir=$(uci -q get luci_statistics.collectd_rrdtool.DataDir)
 
 service_triggers()
 {
+    logger -t ${0##*/} -- luci_statistics service_triggers
 	procd_add_reload_trigger "luci_statistics"
 }
 
 start_service() {
+    logger -t ${0##*/} -- luci_statistics start_service
 	### replace shipped config with symlink
 	mkdir -p /var/etc
 	if [ ! -L /etc/collectd.conf ]; then
@@ -43,10 +46,21 @@ start_service() {
 	### restore if necessary
 	rrd_restore
 
+	### During install, collectd might be started when it got
+	### installed/configured before this package gets
+	### installed/configured.  So we need to check if it's
+	### running, and restart it now that we have configured
+	### statistics.
+	logger -t ${0##*/} -- luci_statistics starting collectd
+	/etc/init.d/collectd status >/dev/null 2>&1 && {
+		logger -t ${0##*/} -- luci_statistics startup found collectd, stopping it
+		/etc/init.d/collectd stop >/dev/null 2>&1
+	}
 	/etc/init.d/collectd start
 }
 
 rrd_restore() {
+    logger -t ${0##*/} -- luci_statistics rrd_restore
 	### Restore backup if backups enabled and we have a nonzero backup file
 	[ -n "$do_backups" -a -s "$BACKUP_FILE" ] && {
 		### data dir is like /tmp/rrd
@@ -59,6 +73,7 @@ rrd_restore() {
 }
 
 rrd_backup() {
+    logger -t ${0##*/} -- luci_statistics rrd_backup
 	### Create backup if backups are enabled and the data directory is present
 	[ -n "$do_backups" -a -d "$rrd_dir" ] && {
 		local tmp_file=$(mktemp -u)
@@ -70,27 +85,41 @@ rrd_backup() {
 }
 
 backup() {
+    logger -t ${0##*/} -- luci_statistics backup
 	/etc/init.d/collectd status >/dev/null 2>&1 && {
+		logger -t ${0##*/} -- luci_statistics stopping collectd
 		collectd_restart=yes
 		/etc/init.d/collectd stop >/dev/null 2>&1
 	}
 	rrd_backup
-	[ "$collectd_restart" = "yes" ] && /etc/init.d/collectd start >/dev/null 2>&1
+	[ "$collectd_restart" = "yes" ] && {
+		logger -t ${0##*/} -- luci_statistics starting collectd
+		/etc/init.d/collectd start >/dev/null 2>&1
+	}
 }
 
 stop_service() {
+    logger -t ${0##*/} -- luci_statistics stop_service stopping collectd
 	/etc/init.d/collectd stop
 	backup
 }
 
 reload_service() {
+    logger -t ${0##*/} -- luci_statistics reload_service
 	restart "$@"
 }
 
 restart() {
+    logger -t ${0##*/} -- luci_statistics restart
 	### Stop data collection (and make a backup if configured)
 	stop
 
 	### regenerate config / prepare environment
 	start
+}
+
+backups_enabled() {
+    logger -t ${0##*/} -- luci_statistics backups_enabled
+	[ "$do_backups" = "yes" ]
+	exit $?
 }
