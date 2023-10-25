@@ -17,7 +17,7 @@ return baseclass.extend({
 		o.depends('enable', '1');
 
 		o = s.option(form.Flag, 'backup', _('Backup RRD statistics'),
-			     _('Backup and restore RRD statistics to/from non-volatile storage around shutdown, reboot, or sysupgrade'));
+			     _('Backup and restore RRD statistics to/from non-volatile storage around shutdown, reboot, and/or sysupgrade'));
 		o.default = '0';
 		o.depends('enable', '1');
 
