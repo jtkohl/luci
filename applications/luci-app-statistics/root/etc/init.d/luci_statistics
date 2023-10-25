@@ -1,7 +1,85 @@
 #!/bin/sh /etc/rc.common
 
+# run luci_statistics before collectd starts (80) and stop after
+# collectd stops (10):
 START=79
+STOP=11
 USE_PROCD=1
+
+# We only want to restore a sysupgrade backup file if
+# (a) it was installed by sysupgrade -r, and we have rebooted
+#     [in this case we do not want to overwrite the sysupgrade backup
+#      during orderly shutdown after restoring the config file backup]
+
+# (b) it was generated during a true sysupgrade, and we are rebooting
+#     into the new image [do not overwrite the backup while upgrading]
+#     (sysupgrade with any or none of -o, -c, -f, -u, resulting in a
+#     new image being installed and a config file being preserved for
+#     processing after reboot)
+#
+# When the administrator runs sysupgrade -b (command line or LuCI), we
+# create a sysupgrade backup file and it is included in the combined
+# backup.  Then the system continues running.  When we later stop or
+# restart or reboot, we do not want to use this sysupgrade.  If we had
+# a control path after sysupgrade -b that would allow us to remove the
+# sysupgrade backup, this would be simple.  But we don't!
+#
+# What we can do is arrange that a restored backup contains enough
+# information to indicate if the sysupgrade backup should be used.
+#
+# (a) True sysupgrade is straightforward: we arrange that the backed-up
+#     file list only includes the sysupgrade backup file
+#
+# (b) continued system operation after sysupgrade -b: next time we
+#     stop the service (during reboot or during other init script
+#     actions), we check for a stale sysupgrade backup, and if we
+#     detect it we remove it.
+#
+# (c) sysupgrade -r only unpacks the backup files, it does not erase
+#     other non-backed-up files still in the overlay.  Its intended
+#     use is to then immediately reboot, which will run an orderly
+#     shutdown/normal backup.  We must ensure the service stopping in this
+#     case preserves the sysupgrade backup, unlike case (b).
+#
+# To implement (b) and (c), we use a pair of extra files, only one of
+# which is included in the list of files preserved by sysupgrade.  If
+# we detect mismatched files (or only one file present) during service
+# shutdown or startup, we interpret that as an indication that the
+# sysupgrade backup should be kept and restored.  If the files are
+# matched, that indicates that we have not restored files since the
+# sysupgrade backup, and the current normal backup should be used
+# instead.
+#
+# During a true sysupgrade, only the sysupgrade backup file and one of
+# the extra files is restored after the image reboots, so the first
+# running of startup scripting will restore the sysupgrade backup.
+# This could be at the time of first boot, if the image has been built
+# to include this package, or it could be later when the package is
+# downloaded, installed, and the service is started.
+
+BACKUP_DIR="/etc/luci_statistics"
+BACKUP_FILE="${BACKUP_DIR}/rrdbackup.tgz"
+SYSUPGRADE_BACKUP_FILE="${BACKUP_DIR}/rrdbackup.sysupgrade.tgz"
+SYSUPGRADE_BACKUP_TWIN_A="${BACKUP_DIR}/sysupgrade.trustme.txt"
+SYSUPGRADE_BACKUP_TWIN_B="${BACKUP_DIR}/sysupgrade.dont.trustme.txt"
+EXTRA_COMMANDS="backup sysupgrade_backup" EXTRA_HELP="\ backup Backup
+current rrd database if configured to do so\n\ sysupgrade_backup Take
+a special backup for sysupgrade/configuration saving"
+
+TRACE=0
+
+### Determine if we should do backups/restores
+rrd_enabled=$(uci -q get luci_statistics.collectd_rrdtool.enable)
+rrd_backups_enabled=$(uci -q get luci_statistics.collectd_rrdtool.backup)
+rrd_dir=$(uci -q get luci_statistics.collectd_rrdtool.DataDir)
+
+### Do backups if RRD is enabled, backups enabled, and the data
+### directory name is non-empty
+[ "$rrd_enabled" = "1" \
+		 -a "$rrd_backups_enabled" = "1" \
+		 -a -n "$rrd_dir" ] && {
+    do_backups=yes
+}
 
 service_triggers()
 {
@@ -21,6 +99,106 @@ start_service() {
 
 	### workaround broken permissions on /tmp
 	chmod 1777 /tmp
+
+	### restore if necessary
+	rrd_restore
+
+	### During install, collectd might be started when it got
+	### installed/configured before this package gets
+	### installed/configured.  So we need to check if it's
+	### running, and restart it now that we have configured
+	### statistics.
+	/etc/init.d/collectd status >/dev/null 2>&1 && /etc/init.d/collectd stop >/dev/null 2>&1
+	/etc/init.d/collectd start
+}
+
+matched_twins() {
+	cmp -s "${SYSUPGRADE_BACKUP_TWIN_A}" "${SYSUPGRADE_BACKUP_TWIN_B}"
+}
+
+remove_sysupgrade_backup() {
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics removing stale sysupgrade backup
+	rm -f "${SYSUPGRADE_BACKUP_FILE}"
+	rm -f "${SYSUPGRADE_BACKUP_TWIN_A}" "${SYSUPGRADE_BACKUP_TWIN_B}"
+}
+
+rrd_restore() {
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics rrd_restore
+	[ -n "$do_backups" ] && {
+		### Restore backup if backups enabled and we have a
+		### nonzero backup file and the twins are unequal
+		### (absent or one missing or both present but
+		### mismatched).
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics checking sysupgrade backup
+		[ -s "${SYSUPGRADE_BACKUP_FILE}" ] && ! matched_twins && {
+			### restore sysupgrade file to replace any
+			### backup temporarily in place during various
+			### upgrades or reboots
+			[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics restoring sysupgrade backup
+			mv -f "${SYSUPGRADE_BACKUP_FILE}" "${BACKUP_FILE}"
+		}
+		[ -s "${BACKUP_FILE}" ] && {
+			[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics restoring backup
+			### rrd_dir is like /tmp/rrd
+			### tar file contains files like tmp/rrd/xyz/pdq
+			### we unpack only files/directories under tmp/rrd
+			data_relative=${rrd_dir#/}
+			[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics restoring only ${data_relative}
+			tar -xzf "${BACKUP_FILE}" -C / ${data_relative}
+		}
+	}
+}
+
+rrd_backup() {
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics rrd_backup
+	### Create backup if backups are enabled and the data
+	### directory is present
+	[ -n "$do_backups" -a -d "$rrd_dir" ] && {
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics making backup
+		local tmp_file=$(mktemp -u)
+		tar -czf "$tmp_file" -C / "$rrd_dir" 2>/dev/null
+		mkdir -p "${BACKUP_DIR}"
+		mv "$tmp_file" "${BACKUP_FILE}"
+		rm -f "$tmp_file"
+
+		### If there is a matched set of twins, then sometime
+		### since the last service start the administrator ran
+		### 'sysupgrade -b' and had the chance to copy the
+		### backup, so we can now erase the twins and the
+		### sysupgrade backup.
+		matched_twins && remove_sysupgrade_backup
+
+		### If there is a mismatched set of twins, then
+		### someone restored a backup (sysupgrade -r) and
+		### we should now be rebooting, so we should leave the
+		### sysupgrade files alone to be processed on service
+		### restart (after reboot).
+
+		### If someone takes a backup and then restores it
+		### before they reboot or restart statistics, the
+		### twins will still match, and we then don't keep the
+		### statistics from the restored backup, we instead
+		### take a new backup and use that on reboot.
+	}
+}
+
+backup() {
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics backup
+	/etc/init.d/collectd status >/dev/null 2>&1 && {
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics stoppping collectd
+		collectd_restart=yes
+		/etc/init.d/collectd stop >/dev/null 2>&1
+	}
+	rrd_backup
+	[ "$collectd_restart" = "yes" ] && {
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics starting collectd
+		/etc/init.d/collectd start >/dev/null 2>&1
+	}
+}
+
+stop_service() {
+	/etc/init.d/collectd stop
+	backup
 }
 
 reload_service() {
@@ -28,9 +206,42 @@ reload_service() {
 }
 
 restart() {
+	### Stop data collection (and make a backup if configured)
+	stop
+
 	### regenerate config / prepare environment
 	start
+}
 
-	### restart collectd
-	/etc/init.d/collectd restart
+copy_backup_for_sysupgrade() {
+	local backup_date=$(date -Iseconds)
+	cp -p ${BACKUP_FILE} ${SYSUPGRADE_BACKUP_FILE}
+	echo ${backup_date} >${SYSUPGRADE_BACKUP_TWIN_A}
+	echo ${backup_date} >${SYSUPGRADE_BACKUP_TWIN_B}
+}
+
+sysupgrade_backup() {
+	local filelist="$1"
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics sysupgrade_backup CONF_BACKUP_LIST=${CONF_BACKUP_LIST}
+
+	[ "$do_backups" = "yes" ] && {
+		### CONF_BACKUP_LIST=1 means we are generating the
+		### list, so we don't make the actual backup.
+		[ "$CONF_BACKUP_LIST" != "1" ] && {
+			### Check procd status to see if we're
+			### running, and if so, execute a backup.
+			### (Otherwise use existing backup.)
+			status >/dev/null 2>&1 && backup
+			### Copy the backup to use for sysupgrade
+			copy_backup_for_sysupgrade
+		}
+		### Edit the backup file list to remove everything from
+		### our backup directory added by someone else (such as
+		### sysupgrade -c or sysupgrade -o)
+		sed -i -e /${BACKUP_DIR//\//\\/}/d $filelist
+		### Add only the files we need to ensure proper
+		### restore behavior
+		echo ${SYSUPGRADE_BACKUP_FILE} >>$filelist
+		echo ${SYSUPGRADE_BACKUP_TWIN_A} >>$filelist
+	}
 }
