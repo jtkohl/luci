@@ -117,44 +117,44 @@ matched_twins() {
 }
 
 remove_sysupgrade_backup() {
-	${TRACE} || logger -t ${0##*/} -- luci_statistics removing stale sysupgrade backup
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics removing stale sysupgrade backup
 	rm -f "${SYSUPGRADE_BACKUP_FILE}"
 	rm -f "${SYSUPGRADE_BACKUP_TWIN_A}" "${SYSUPGRADE_BACKUP_TWIN_B}"
 }
 
 rrd_restore() {
-	${TRACE} || logger -t ${0##*/} -- luci_statistics rrd_restore
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics rrd_restore
 	[ -n "$do_backups" ] && {
 		### Restore backup if backups enabled and we have a
 		### nonzero backup file and the twins are unequal
 		### (absent or one missing or both present but
 		### mismatched).
-		${TRACE} || logger -t ${0##*/} -- luci_statistics checking sysupgrade backup
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics checking sysupgrade backup
 		[ -s "${SYSUPGRADE_BACKUP_FILE}" ] && ! matched_twins && {
 			### restore sysupgrade file to replace any
 			### backup temporarily in place during various
 			### upgrades or reboots
-			${TRACE} || logger -t ${0##*/} -- luci_statistics restoring sysupgrade backup
+			[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics restoring sysupgrade backup
 			mv -f "${SYSUPGRADE_BACKUP_FILE}" "${BACKUP_FILE}"
 		}
 		[ -s "${BACKUP_FILE}" ] && {
-			${TRACE} || logger -t ${0##*/} -- luci_statistics restoring backup
+			[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics restoring backup
 			### rrd_dir is like /tmp/rrd
 			### tar file contains files like tmp/rrd/xyz/pdq
 			### we unpack only files/directories under tmp/rrd
 			data_relative=${rrd_dir#/}
-			${TRACE} || logger -t ${0##*/} -- luci_statistics restoring only ${data_relative}
+			[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics restoring only ${data_relative}
 			tar -xzf "${BACKUP_FILE}" -C / ${data_relative}
 		}
 	}
 }
 
 rrd_backup() {
-	${TRACE} || logger -t ${0##*/} -- luci_statistics rrd_backup
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics rrd_backup
 	### Create backup if backups are enabled and the data
 	### directory is present
 	[ -n "$do_backups" -a -d "$rrd_dir" ] && {
-		${TRACE} || logger -t ${0##*/} -- luci_statistics making backup
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics making backup
 		local tmp_file=$(mktemp -u)
 		tar -czf "$tmp_file" -C / "$rrd_dir" 2>/dev/null
 		mkdir -p "${BACKUP_DIR}"
@@ -183,15 +183,15 @@ rrd_backup() {
 }
 
 backup() {
-	${TRACE} || logger -t ${0##*/} -- luci_statistics backup
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics backup
 	/etc/init.d/collectd status >/dev/null 2>&1 && {
-		${TRACE} || logger -t ${0##*/} -- luci_statistics stoppping collectd
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics stoppping collectd
 		collectd_restart=yes
 		/etc/init.d/collectd stop >/dev/null 2>&1
 	}
 	rrd_backup
 	[ "$collectd_restart" = "yes" ] && {
-		${TRACE} || logger -t ${0##*/} -- luci_statistics starting collectd
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics starting collectd
 		/etc/init.d/collectd start >/dev/null 2>&1
 	}
 }
@@ -222,7 +222,7 @@ copy_backup_for_sysupgrade() {
 
 sysupgrade_backup() {
 	local filelist="$1"
-	${TRACE} || logger -t ${0##*/} -- luci_statistics sysupgrade_backup CONF_BACKUP_LIST=${CONF_BACKUP_LIST}
+	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics sysupgrade_backup CONF_BACKUP_LIST=${CONF_BACKUP_LIST}
 
 	[ "$do_backups" = "yes" ] && {
 		### CONF_BACKUP_LIST=1 means we are generating the
