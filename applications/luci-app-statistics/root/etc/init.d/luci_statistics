@@ -6,6 +6,12 @@ START=79
 STOP=11
 USE_PROCD=1
 
+# The backup scheme here aims to limit writes to stable storage
+# that survives reboots and upgrade.  (Flash-memory based routers
+# may have limited lifetime of write cycles, we want to conserve
+# those.)  (It would be simpler to run a periodic backup as a cron
+# job, but you'd risk wearing out the flash memory.)
+#
 # We only want to restore a sysupgrade backup file if
 # (a) it was installed by sysupgrade -r, and we have rebooted
 #     [in this case we do not want to overwrite the sysupgrade backup
@@ -185,7 +191,7 @@ rrd_backup() {
 backup() {
 	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics backup
 	/etc/init.d/collectd status >/dev/null 2>&1 && {
-		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics stoppping collectd
+		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics stopping collectd
 		collectd_restart=yes
 		/etc/init.d/collectd stop >/dev/null 2>&1
 	}
