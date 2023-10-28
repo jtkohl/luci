@@ -105,3 +105,32 @@ If there are matched twin files (the normal case for shutdown/reboot
 without sysupgrade), then the sysupgrade backup is ignored and the
 regular backup is restored.  If there are mismatched twin files, then
 the sysupgrade backup is restored.
+
+## During disorderly reboot
+
+In a system crash or other disorderly reboot, the shutdown scripts do
+not run.  What remains on the system is the previous contents of
+`/etc/luci_statistics`.
+
+* If the system never started luci_statistics, or it was cleanly shut
+  down before the crash, then there is no difference in behavior from
+  normal startup: we restore either the sysupgrade backup (if
+  luci_statistics had never run) or the regular backup (if
+  luci_statistics was cleanly stopped)
+
+* If luci_statistics and collectd were running at the time of the crash,
+  there could be a regular backup and a sysupgrade backup present, plus
+  volatile data in /tmp (which are lost in the crash).  The regular
+  backup would be from the most recent time the system cleanly stopped
+  luci_statistics.  During the subsequent reboot/service start up:
+
+  * If there is a sysupgrade backup on disk from having run `sysupgrade
+    -b`, with both twin files matching (meaning the administrator had
+    taken a backup sometime during the life of the system, before the
+    crash), they are ignored and a regular backup (if any) is restored.
+
+  * If the sysupgrade backup has mismatched twin files or only one twin,
+	then it is used to restore state.  This would be the case if a
+	sysupgrade restored configuration (`sysupgrade -r`), whether or not
+	it did an orderly shutdown/reboot, or if the file system were
+	damaged in a crash and only one of the twin files survived.
