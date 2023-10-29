@@ -18,15 +18,18 @@ a special backup for sysupgrade/configuration saving"
 
 TRACE=0
 
-### Determine if we should do backups/restores
-rrd_enabled=$(uci -q get luci_statistics.collectd_rrdtool.enable)
-rrd_backups_enabled=$(uci -q get luci_statistics.collectd_rrdtool.backup)
-rrd_dir=$(uci -q get luci_statistics.collectd_rrdtool.DataDir)
+doing_backups() {
+	### Determine if we should do backups/restores
+	local rrd_enabled=$(uci -q get luci_statistics.collectd_rrdtool.enable)
+	local rrd_backups_enabled=$(uci -q get luci_statistics.collectd_rrdtool.backup)
+	rrd_dir=$(uci -q get luci_statistics.collectd_rrdtool.DataDir)
 
-[ "$rrd_enabled" = "1" \
-		 -a "$rrd_backups_enabled" = "1" \
-		 -a -n "$rrd_dir" ] && {
-    do_backups=yes
+	[ "$rrd_enabled" = "1" \
+			 -a "$rrd_backups_enabled" = "1" \
+			 -a -n "$rrd_dir" ] && {
+		return 0
+	}
+	return 1
 }
 
 service_triggers()
@@ -69,7 +72,7 @@ remove_sysupgrade_backup() {
 
 rrd_restore() {
 	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics rrd_restore
-	[ -n "$do_backups" ] && {
+	doing_backups && {
 		### Restore backup if backups enabled and we have a
 		### nonzero backup file and the twins are unequal
 		### (absent or one missing or both present but
@@ -94,8 +97,7 @@ rrd_restore() {
 
 rrd_backup() {
 	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics rrd_backup
-
-	[ -n "$do_backups" -a -d "$rrd_dir" ] && {
+	doing_backups && [ -d "$rrd_dir" ] && {
 		[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics making backup
 		local tmp_file=$(mktemp -u)
 		tar -czf "$tmp_file" -C / "$rrd_dir" 2>/dev/null
@@ -149,8 +151,7 @@ copy_backup_for_sysupgrade() {
 sysupgrade_backup() {
 	local filelist="$1"
 	[ ${TRACE} -gt 0 ] && logger -t ${0##*/} -- luci_statistics sysupgrade_backup CONF_BACKUP_LIST=${CONF_BACKUP_LIST}
-
-	[ "$do_backups" = "yes" ] && {
+	doing_backups && {
 		### CONF_BACKUP_LIST=1 means we are generating the
 		### list, so we don't make the actual backup.
 		[ "$CONF_BACKUP_LIST" != "1" ] && {
